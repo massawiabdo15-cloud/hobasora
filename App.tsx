@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import { StoryStyle, AspectRatio, Character, Scene, StoryAnalysis, ProjectData } from './types';
 import { STORY_STYLES, ASPECT_RATIOS } from './constants';
@@ -12,17 +12,22 @@ import { ErrorMessage } from './components/ErrorMessage';
 import { Header } from './components/Header';
 import { StoryGeneratorSection } from './components/StoryGeneratorSection';
 
-// Define the AIStudio interface to match the expected global type
-interface AIStudio {
-  hasSelectedApiKey: () => Promise<boolean>;
-  openSelectKey: () => Promise<void>;
-}
+// Ensure process is recognized globally in the browser environment
+declare const process: {
+  env: {
+    API_KEY: string;
+  };
+};
 
-// Extend window for AI Studio helpers
+// Fix: Extend window for AI Studio helpers.
+// We define the structure inline and remove 'readonly' to ensure compatibility 
+// with the pre-configured global execution context and avoid modifier/type mismatch errors.
 declare global {
   interface Window {
-    // Fix: Use the AIStudio interface to ensure identical modifiers and types with global declarations
-    readonly aistudio: AIStudio;
+    aistudio: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
   }
 }
 
@@ -74,7 +79,6 @@ const App: React.FC = () => {
         setCharacters([]);
         setScenes([]);
 
-        // Create new instance before API call using process.env.API_KEY directly.
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
         const prompt = `
@@ -156,7 +160,6 @@ const App: React.FC = () => {
     }, [storyText, numScenes, storyStyle, aspectRatio, notes]);
 
     const generateAllCharacterImages = async (initialCharacters: Character[]) => {
-        // Create new instance before API call using process.env.API_KEY directly.
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         setLoadingMessage('جاري إنشاء صور الشخصيات...');
         const characterPromises = initialCharacters.map(async (char) => {
@@ -190,7 +193,6 @@ const App: React.FC = () => {
     };
 
     const regenerateCharacterImage = useCallback(async (characterIndex: number) => {
-        // Create new instance before API call using process.env.API_KEY directly.
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const character = characters[characterIndex];
         if (!character) return;
@@ -264,7 +266,6 @@ const App: React.FC = () => {
     };
 
     const generateSceneImage = useCallback(async (sceneIndex: number) => {
-        // Create new instance before API call using process.env.API_KEY directly.
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const scene = scenes[sceneIndex];
         if (!scene) return;
@@ -273,13 +274,16 @@ const App: React.FC = () => {
         setError(null);
 
         const validCharacterImages = characters
-            .filter(c => c.image)
-            .map(c => ({
-                inlineData: {
-                    data: c.image!.split(',')[1],
-                    mimeType: c.image!.split(';')[0].split(':')[1],
-                },
-            }));
+            .filter(c => c.image !== null)
+            .map(c => {
+                const img = c.image!;
+                return {
+                    inlineData: {
+                        data: img.split(',')[1],
+                        mimeType: img.split(';')[0].split(':')[1],
+                    },
+                };
+            });
 
         const promptWithAspectRatio = `تعليمات هامة: يجب إنشاء الصورة النهائية بنسبة عرض إلى ارتفاع صارمة تبلغ ${scene.aspectRatio.value}. محتوى الصورة هو: ${scene.prompt}`;
 
@@ -315,13 +319,11 @@ const App: React.FC = () => {
             return;
         }
 
-        // Check for API key for Veo
         const hasKey = await window.aistudio.hasSelectedApiKey();
         if (!hasKey) {
             await window.aistudio.openSelectKey();
         }
 
-        // Create new instance before API call using process.env.API_KEY directly.
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         setScenes(prev => prev.map((s, i) => i === sceneIndex ? { ...s, isVideoLoading: true } : s));
         setError(null);
@@ -330,7 +332,6 @@ const App: React.FC = () => {
             const base64Data = scene.image.split(',')[1];
             const mimeType = scene.image.split(';')[0].split(':')[1];
 
-            // Specific instruction for character movement
             const animationPrompt = `Animate the characters in this scene with natural, fluid movements. Make them blink, move their heads, or perform subtle actions matching the scene context: ${scene.prompt}. Keep the background consistent.`;
 
             let targetAspectRatio: '16:9' | '9:16' = '16:9';
@@ -380,28 +381,6 @@ const App: React.FC = () => {
         setScenes(prev => prev.map((scene, index) =>
             index === sceneIndex ? { ...scene, image: null, videoUri: null } : scene
         ));
-    };
-
-    const handleExportProject = () => {
-        const projectData: ProjectData = {
-            storyText,
-            notes,
-            numScenes,
-            storyStyle,
-            aspectRatio,
-            characters,
-            scenes,
-        };
-        const jsonString = JSON.stringify(projectData, null, 2);
-        const blob = new Blob([jsonString], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'story-visualizer-project.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
     };
 
     const handleImportProject = (file: File) => {
