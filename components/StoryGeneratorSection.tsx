@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { STORY_GENRES, WRITING_STYLES } from '../constants';
@@ -18,8 +19,7 @@ export const StoryGeneratorSection: React.FC<StoryGeneratorSectionProps> = ({ on
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-
+    // Initializing AI right before use to ensure correct API key
     const handleGenerateStory = async () => {
         if (!idea.trim()) {
             setError('الرجاء إدخال فكرة للقصة.');
@@ -28,6 +28,9 @@ export const StoryGeneratorSection: React.FC<StoryGeneratorSectionProps> = ({ on
         setIsLoading(true);
         setError(null);
         setGeneratedStory('');
+
+        // Fix: Use process.env.API_KEY directly as recommended for GoogleGenAI initialization.
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
         const prompt = `
         اكتب قصة من نوع "${genre.label}" بأسلوب كتابة "${writingStyle.label}".
@@ -38,10 +41,10 @@ export const StoryGeneratorSection: React.FC<StoryGeneratorSectionProps> = ({ on
 
         try {
             const response: GenerateContentResponse = await ai.models.generateContent({
-                model: "gemini-2.5-pro",
+                model: "gemini-3-pro-preview",
                 contents: prompt,
             });
-            const story = response.text;
+            const story = response.text || '';
             setGeneratedStory(story);
         } catch (e) {
             console.error(e);

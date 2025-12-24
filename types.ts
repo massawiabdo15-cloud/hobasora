@@ -13,7 +13,9 @@ export interface Scene {
     sceneNumber: number;
     prompt: string;
     image: string | null;
+    videoUri: string | null; // Added for video support
     isLoading: boolean;
+    isVideoLoading: boolean; // Added to track video generation state
     aspectRatio: AspectRatio;
 }
 

@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef } from 'react';
-import { GoogleGenAI, GenerateContentResponse, Type, Modality } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import { StoryStyle, AspectRatio, Character, Scene, StoryAnalysis, ProjectData } from './types';
 import { STORY_STYLES, ASPECT_RATIOS } from './constants';
 import { fileToBase64, parsePdf } from './utils/fileUtils';
@@ -11,6 +11,20 @@ import { LoadingSpinner } from './components/LoadingSpinner';
 import { ErrorMessage } from './components/ErrorMessage';
 import { Header } from './components/Header';
 import { StoryGeneratorSection } from './components/StoryGeneratorSection';
+
+// Define the AIStudio interface to match the expected global type
+interface AIStudio {
+  hasSelectedApiKey: () => Promise<boolean>;
+  openSelectKey: () => Promise<void>;
+}
+
+// Extend window for AI Studio helpers
+declare global {
+  interface Window {
+    // Fix: Use the AIStudio interface to ensure identical modifiers and types with global declarations
+    readonly aistudio: AIStudio;
+  }
+}
 
 const App: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'generator' | 'visualizer'>('generator');
@@ -24,8 +38,6 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [loadingMessage, setLoadingMessage] = useState<string>('');
     const [error, setError] = useState<string | null>(null);
-
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
 
     const handleStoryGenerated = (newStory: string) => {
         setStoryText(newStory);
@@ -62,14 +74,17 @@ const App: React.FC = () => {
         setCharacters([]);
         setScenes([]);
 
+        // Create new instance before API call using process.env.API_KEY directly.
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
         const prompt = `
         اقرأ القصة التالية بعناية. مهمتك هي:
         1. تحديد الشخصيات الرئيسية وتقديم وصف بصري مفصل لكل شخصية مناسب لتوليد صورة.
         2. تقسيم القصة إلى ${numScenes} مشاهد رئيسية.
-        3. لكل مشهد، قم بكتابة برومت (prompt) مفصل ومبدع لتوليد صورة فنية. يجب أن يتضمن البرومت وصفًا للمكان، الحدث، الشخصيات الموجودة، زاوية كاميرا سينمائية (مثل: wide shot, close-up, low-angle shot)، ونوع الإضاءة (مثل: dramatic lighting, soft morning light, neon glow). يجب أن ينتهي كل برومت بعبارة " بأسلوب ${storyStyle.label}".
+        3. لكل مشهد، قم بكتابة برومت (prompt) مفصل ومبدع لتوليد صورة فنية. يجب أن يتضمن البرومت وصفًا للمكان، الحدث، الشخصيات الموجودة، زاوية كاميرا سينمائية، ونوع الإضاءة. يجب أن ينتهي كل برومت بعبارة " بأسلوب ${storyStyle.label}".
         
         ${notes ? `
-        ملحوظات إضافية هامة يجب مراعاتها عند تحليل القصة ووصف المشاهد والشخصيات:
+        ملحوظات إضافية هامة:
         ${notes}
         ` : ''}
 
@@ -81,7 +96,7 @@ const App: React.FC = () => {
 
         try {
             const response: GenerateContentResponse = await ai.models.generateContent({
-                model: "gemini-2.5-pro",
+                model: "gemini-3-pro-preview",
                 contents: prompt,
                 config: {
                     responseMimeType: "application/json",
@@ -93,8 +108,8 @@ const App: React.FC = () => {
                                 items: {
                                     type: Type.OBJECT,
                                     properties: {
-                                        name: { type: Type.STRING, description: 'اسم الشخصية' },
-                                        description: { type: Type.STRING, description: 'وصف بصري للشخصية' }
+                                        name: { type: Type.STRING },
+                                        description: { type: Type.STRING }
                                     },
                                     required: ['name', 'description']
                                 }
@@ -104,8 +119,8 @@ const App: React.FC = () => {
                                 items: {
                                     type: Type.OBJECT,
                                     properties: {
-                                        sceneNumber: { type: Type.INTEGER, description: 'رقم المشهد' },
-                                        prompt: { type: Type.STRING, description: 'البرومت المفصل للمشهد' }
+                                        sceneNumber: { type: Type.INTEGER },
+                                        prompt: { type: Type.STRING }
                                     },
                                     required: ['sceneNumber', 'prompt']
                                 }
@@ -116,12 +131,19 @@ const App: React.FC = () => {
                 }
             });
             
-            const result: StoryAnalysis = JSON.parse(response.text);
+            const result: StoryAnalysis = JSON.parse(response.text || '{}');
             
             const initialCharacters = result.characters.map(c => ({ ...c, image: null, isLoading: true }));
             setCharacters(initialCharacters);
 
-            const initialScenes = result.scenes.map(s => ({ ...s, image: null, isLoading: false, aspectRatio: aspectRatio }));
+            const initialScenes = result.scenes.map(s => ({ 
+                ...s, 
+                image: null, 
+                videoUri: null,
+                isLoading: false, 
+                isVideoLoading: false,
+                aspectRatio: aspectRatio 
+            }));
             setScenes(initialScenes);
 
             generateAllCharacterImages(initialCharacters);
@@ -131,9 +153,11 @@ const App: React.FC = () => {
             setError('حدث خطأ أثناء تحليل القصة. حاول مرة أخرى.');
             setIsLoading(false);
         }
-    }, [storyText, numScenes, storyStyle, ai.models, aspectRatio, notes]);
+    }, [storyText, numScenes, storyStyle, aspectRatio, notes]);
 
     const generateAllCharacterImages = async (initialCharacters: Character[]) => {
+        // Create new instance before API call using process.env.API_KEY directly.
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         setLoadingMessage('جاري إنشاء صور الشخصيات...');
         const characterPromises = initialCharacters.map(async (char) => {
             const prompt = `صورة شخصية لـ ${char.name}, ${char.description}, بأسلوب ${storyStyle.label}. أنشئ الصورة بنسبة عرض إلى ارتفاع ${aspectRatio.value}.`;
@@ -141,7 +165,6 @@ const App: React.FC = () => {
                 const response = await ai.models.generateContent({
                     model: 'gemini-2.5-flash-image',
                     contents: { parts: [{ text: prompt }] },
-                    config: { responseModalities: [Modality.IMAGE] },
                 });
                 const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
                 if (part && part.inlineData) {
@@ -167,6 +190,8 @@ const App: React.FC = () => {
     };
 
     const regenerateCharacterImage = useCallback(async (characterIndex: number) => {
+        // Create new instance before API call using process.env.API_KEY directly.
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const character = characters[characterIndex];
         if (!character) return;
 
@@ -180,7 +205,6 @@ const App: React.FC = () => {
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-image',
                 contents: { parts: [{ text: prompt }] },
-                config: { responseModalities: [Modality.IMAGE] },
             });
             const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
             if (part && part.inlineData) {
@@ -198,7 +222,7 @@ const App: React.FC = () => {
             ));
              setError(`فشل في إعادة إنشاء صورة لـ ${character.name}.`);
         }
-    }, [characters, storyStyle, ai.models, aspectRatio]);
+    }, [characters, storyStyle, aspectRatio]);
 
     const handleUploadCharacterImage = async (characterIndex: number, file: File) => {
         setCharacters(prev => prev.map((char, index) => 
@@ -240,6 +264,8 @@ const App: React.FC = () => {
     };
 
     const generateSceneImage = useCallback(async (sceneIndex: number) => {
+        // Create new instance before API call using process.env.API_KEY directly.
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const scene = scenes[sceneIndex];
         if (!scene) return;
         
@@ -266,7 +292,6 @@ const App: React.FC = () => {
             const response = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-image',
                 contents: { parts },
-                config: { responseModalities: [Modality.IMAGE] },
             });
             const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
 
@@ -274,18 +299,86 @@ const App: React.FC = () => {
                 const newImage = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
                 setScenes(prev => prev.map((s, i) => i === sceneIndex ? { ...s, image: newImage, isLoading: false } : s));
             } else {
-                throw new Error("لم يتم إرجاع بيانات الصورة من الواجهة البرمجية.");
+                throw new Error("لم يتم إرجاع بيانات الصورة.");
             }
         } catch (e) {
             console.error(`Failed to generate image for scene ${scene.sceneNumber}:`, e);
-            setError(`فشل في إنشاء صورة للمشهد ${scene.sceneNumber}. حاول مرة أخرى.`);
+            setError(`فشل في إنشاء صورة للمشهد ${scene.sceneNumber}.`);
             setScenes(prev => prev.map((s, i) => i === sceneIndex ? { ...s, isLoading: false } : s));
         }
-    }, [scenes, characters, ai.models]);
+    }, [scenes, characters]);
+
+    const generateSceneVideo = useCallback(async (sceneIndex: number) => {
+        const scene = scenes[sceneIndex];
+        if (!scene || !scene.image) {
+            setError('يجب إنشاء صورة للمشهد أولاً قبل تحريكها.');
+            return;
+        }
+
+        // Check for API key for Veo
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+            await window.aistudio.openSelectKey();
+        }
+
+        // Create new instance before API call using process.env.API_KEY directly.
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        setScenes(prev => prev.map((s, i) => i === sceneIndex ? { ...s, isVideoLoading: true } : s));
+        setError(null);
+
+        try {
+            const base64Data = scene.image.split(',')[1];
+            const mimeType = scene.image.split(';')[0].split(':')[1];
+
+            // Specific instruction for character movement
+            const animationPrompt = `Animate the characters in this scene with natural, fluid movements. Make them blink, move their heads, or perform subtle actions matching the scene context: ${scene.prompt}. Keep the background consistent.`;
+
+            let targetAspectRatio: '16:9' | '9:16' = '16:9';
+            if (scene.aspectRatio.value === '9:16') {
+                targetAspectRatio = '9:16';
+            }
+
+            let operation = await ai.models.generateVideos({
+                model: 'veo-3.1-fast-generate-preview',
+                prompt: animationPrompt,
+                image: {
+                    imageBytes: base64Data,
+                    mimeType: mimeType,
+                },
+                config: {
+                    numberOfVideos: 1,
+                    resolution: '720p',
+                    aspectRatio: targetAspectRatio
+                }
+            });
+
+            while (!operation.done) {
+                await new Promise(resolve => setTimeout(resolve, 10000));
+                operation = await ai.operations.getVideosOperation({ operation: operation });
+            }
+
+            const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+            if (downloadLink) {
+                const videoUri = `${downloadLink}&key=${process.env.API_KEY}`;
+                setScenes(prev => prev.map((s, i) => i === sceneIndex ? { ...s, videoUri, isVideoLoading: false } : s));
+            } else {
+                throw new Error("فشل في الحصول على رابط الفيديو.");
+            }
+        } catch (e: any) {
+            console.error(`Failed to generate video for scene ${scene.sceneNumber}:`, e);
+            if (e.message?.includes("Requested entity was not found")) {
+                setError("حدث خطأ في مفتاح API. يرجى اختيار مفتاح صالح.");
+                await window.aistudio.openSelectKey();
+            } else {
+                setError(`فشل في تحريك الشخصيات في المشهد ${scene.sceneNumber}.`);
+            }
+            setScenes(prev => prev.map((s, i) => i === sceneIndex ? { ...s, isVideoLoading: false } : s));
+        }
+    }, [scenes]);
 
     const handleDeleteSceneImage = (sceneIndex: number) => {
         setScenes(prev => prev.map((scene, index) =>
-            index === sceneIndex ? { ...scene, image: null } : scene
+            index === sceneIndex ? { ...scene, image: null, videoUri: null } : scene
         ));
     };
 
@@ -316,36 +409,21 @@ const App: React.FC = () => {
         reader.onload = (event) => {
             try {
                 const result = event.target?.result;
-                if (typeof result !== 'string') {
-                    throw new Error('فشل في قراءة الملف.');
-                }
+                if (typeof result !== 'string') return;
                 const data: ProjectData = JSON.parse(result);
-                // Basic validation
-                if (data.storyText && data.numScenes && data.storyStyle && data.characters && data.scenes && data.aspectRatio) {
+                if (data.storyText && data.numScenes) {
                     setStoryText(data.storyText);
                     setNotes(data.notes || '');
                     setNumScenes(data.numScenes);
                     setStoryStyle(data.storyStyle);
                     setAspectRatio(data.aspectRatio);
                     setCharacters(data.characters);
-                    
-                    const migratedScenes = data.scenes.map(scene => ({
-                        ...scene,
-                        // If aspectRatio is missing in an old project file, set it from the global one
-                        aspectRatio: scene.aspectRatio || data.aspectRatio || ASPECT_RATIOS[0]
-                    }));
-                    setScenes(migratedScenes);
+                    setScenes(data.scenes.map(s => ({ ...s, isVideoLoading: false })));
                     setError(null);
-                } else {
-                    throw new Error('ملف المشروع غير صالح أو تالف.');
                 }
             } catch (e) {
-                console.error(e);
-                setError((e as Error).message || 'فشل في استيراد المشروع. تأكد من أن الملف صحيح.');
+                setError('فشل في استيراد المشروع.');
             }
-        };
-        reader.onerror = () => {
-            setError('حدث خطأ أثناء قراءة الملف.');
         };
         reader.readAsText(file);
     };
@@ -412,18 +490,6 @@ const App: React.FC = () => {
                             {isLoading && <LoadingSpinner message={loadingMessage} />}
                             {error && <ErrorMessage message={error} />}
 
-                            {characters.length > 0 && !isLoading && (
-                                <div className="text-center animate-fade-in">
-                                    <button
-                                        onClick={handleExportProject}
-                                        className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition duration-300 flex items-center justify-center gap-2 mx-auto"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                                        تصدير المشروع
-                                    </button>
-                                </div>
-                            )}
-
                             <div className="animate-fade-in space-y-12">
                                 {characters.length > 0 && (
                                     <CharacterSection 
@@ -439,6 +505,7 @@ const App: React.FC = () => {
                                     <SceneSection
                                         scenes={scenes}
                                         onGenerateImage={generateSceneImage}
+                                        onGenerateVideo={generateSceneVideo}
                                         onAspectRatioChange={handleSceneAspectRatioChange}
                                         onPromptChange={handleScenePromptChange}
                                         onDeleteImage={handleDeleteSceneImage}
