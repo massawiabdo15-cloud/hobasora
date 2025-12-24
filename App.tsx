@@ -19,15 +19,16 @@ declare const process: {
   };
 };
 
-// Fix: Extend window for AI Studio helpers.
-// We define the structure inline and remove 'readonly' to ensure compatibility 
-// with the pre-configured global execution context and avoid modifier/type mismatch errors.
+// Fix: Correctly extend window for AI Studio helpers by using the existing AIStudio type
+// and matching the expected 'readonly' modifier from the environment's global context.
 declare global {
+  interface AIStudio {
+    hasSelectedApiKey: () => Promise<boolean>;
+    openSelectKey: () => Promise<void>;
+  }
+
   interface Window {
-    aistudio: {
-      hasSelectedApiKey: () => Promise<boolean>;
-      openSelectKey: () => Promise<void>;
-    };
+    readonly aistudio: AIStudio;
   }
 }
 
@@ -169,7 +170,8 @@ const App: React.FC = () => {
                     model: 'gemini-2.5-flash-image',
                     contents: { parts: [{ text: prompt }] },
                 });
-                const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
+                const parts = response.candidates?.[0]?.content?.parts || [];
+                const part = parts.find(p => p.inlineData);
                 if (part && part.inlineData) {
                     return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
                 }
@@ -208,7 +210,8 @@ const App: React.FC = () => {
                 model: 'gemini-2.5-flash-image',
                 contents: { parts: [{ text: prompt }] },
             });
-            const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
+            const parts = response.candidates?.[0]?.content?.parts || [];
+            const part = parts.find(p => p.inlineData);
             if (part && part.inlineData) {
                 const newImage = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
                 setCharacters(prev => prev.map((char, index) => 
@@ -297,7 +300,8 @@ const App: React.FC = () => {
                 model: 'gemini-2.5-flash-image',
                 contents: { parts },
             });
-            const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
+            const responseParts = response.candidates?.[0]?.content?.parts || [];
+            const part = responseParts.find(p => p.inlineData);
 
             if (part && part.inlineData) {
                 const newImage = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
