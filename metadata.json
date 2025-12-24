@@ -1,0 +1,5 @@
+{
+  "name": "hoba",
+  "description": "An AI-powered tool to visualize stories. Upload your story, and the app will generate character portraits and scene-by-scene concept art based on your chosen style.",
+  "requestFramePermissions": []
+}
